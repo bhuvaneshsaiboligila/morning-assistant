@@ -10,6 +10,11 @@ import ollama
 from assistant.summarize import MODEL
 
 LOCAL = ZoneInfo("Europe/Berlin")
+UTC = dt.timezone.utc
+
+TIME_RE = re.compile(r"^\s*([01]?\d|2[0-3])[:.]([0-5]\d)\s*$")
+OVERNIGHT_START_HOUR = 18  # end <= start is only treated as overnight if start is this late...
+OVERNIGHT_END_HOUR = 6     # ...and end is this early, e.g. 22:00-01:00
 
 SCHEMA = {
     "type": "object",
@@ -36,11 +41,28 @@ Rules:
 
 Message: {text}"""
 
-def _time(s):
-    m = re.match(r"^\s*(\d{1,2})[:.](\d{2})", s or "")
-    if not m:
+def _parse_time_field(s):
+    """None stays None (all-day). Anything else must be strict HH:MM (":" or "."), else raise."""
+    if s is None:
         return None
+    m = TIME_RE.match(str(s))
+    if not m:
+        raise ValueError(f"invalid time value: {s!r} - expected HH:MM")
     return dt.time(int(m.group(1)), int(m.group(2)))
+
+def _dst_flag(label, local_dt):
+    """Flag a start/end datetime that falls in a Europe/Berlin DST gap or ambiguous fold."""
+    naive = local_dt.replace(tzinfo=None)
+    utc0 = local_dt.replace(fold=0).astimezone(UTC)
+    utc1 = local_dt.replace(fold=1).astimezone(UTC)
+    if utc0 == utc1:
+        return None
+    back0 = utc0.astimezone(LOCAL).replace(tzinfo=None)
+    if back0 == naive:
+        return (f"{label} time {naive:%H:%M} on {naive:%d %b} is ambiguous (clocks fall back "
+                f"that night) - using the earlier occurrence")
+    return (f"{label} time {naive:%H:%M} on {naive:%d %b} does not exist (clocks spring forward "
+            f"that night) - treated as {back0:%H:%M}")
 
 def human(minutes):
     if minutes == 0:
@@ -50,6 +72,55 @@ def human(minutes):
             n = minutes // size
             return f"{n} {unit}{'s' if n > 1 else ''} before"
     return f"{minutes} min before"
+
+def build_event(d, now):
+    """Pure post-processing: model JSON `d` -> event dict. Raises ValueError on bad input.
+
+    Every automatic correction or default (missing end time, overnight end,
+    default reminders) is recorded in ev["notes"] so it can be shown on the
+    confirmation card.
+    """
+    notes = []
+    date = dt.date.fromisoformat(str(d["date"]).strip())
+    start_t = _parse_time_field(d.get("start_time"))
+    end_t = _parse_time_field(d.get("end_time"))
+    ev = {"title": (d.get("title") or "Event").strip()[:100],
+          "location": (d.get("location") or "").strip()[:100]}
+
+    if start_t:
+        start = dt.datetime.combine(date, start_t, LOCAL)
+        if end_t is None:
+            end = start + dt.timedelta(hours=1)
+            notes.append("no end time given - defaulted to 1 hour")
+        else:
+            end_date = date
+            if end_t <= start_t:
+                if start_t.hour >= OVERNIGHT_START_HOUR and end_t.hour <= OVERNIGHT_END_HOUR:
+                    end_date = date + dt.timedelta(days=1)
+                    notes.append("end time is before start time - treated as an overnight "
+                                 "event ending the next day")
+                else:
+                    raise ValueError(f"end time {end_t:%H:%M} is not after start time {start_t:%H:%M}")
+            end = dt.datetime.combine(end_date, end_t, LOCAL)
+        for label, moment in (("start", start), ("end", end)):
+            flag = _dst_flag(label, moment)
+            if flag:
+                notes.append(flag)
+        ev.update(all_day=False, start=start, end=end)
+    else:
+        ev.update(all_day=True, start=date, end=date + dt.timedelta(days=1))
+
+    asked = sorted({int(m) for m in (d.get("remind_minutes_before") or []) if 0 <= int(m) <= 40320},
+                   reverse=True)[:5]
+    if not asked:
+        if ev["all_day"]:
+            asked = [1440]
+        else:
+            asked = [1440, 60] if ev["start"] - now > dt.timedelta(days=1) else [0]
+        notes.append("no reminder requested - used the default")
+    ev["reminders"] = asked
+    ev["notes"] = notes
+    return ev
 
 def parse(text):
     """Return an event dict, or raise if the message can't be understood."""
@@ -62,28 +133,7 @@ def parse(text):
         options={"temperature": 0, "num_ctx": 2048},
     )
     d = json.loads(r.message.content)
-    date = dt.date.fromisoformat(str(d["date"]).strip())
-    start_t, end_t = _time(d.get("start_time")), _time(d.get("end_time"))
-    ev = {"title": (d.get("title") or "Event").strip()[:100],
-          "location": (d.get("location") or "").strip()[:100]}
-    if start_t:
-        start = dt.datetime.combine(date, start_t, LOCAL)
-        end = dt.datetime.combine(date, end_t, LOCAL) if end_t else start + dt.timedelta(hours=1)
-        if end <= start:
-            end = start + dt.timedelta(hours=1)
-        ev.update(all_day=False, start=start, end=end)
-    else:
-        ev.update(all_day=True, start=date, end=date + dt.timedelta(days=1))
-
-    asked = sorted({int(m) for m in (d.get("remind_minutes_before") or []) if 0 <= int(m) <= 40320},
-                   reverse=True)[:5]
-    if not asked:
-        if ev["all_day"]:
-            asked = [1440]
-        else:
-            asked = [1440, 60] if ev["start"] - now > dt.timedelta(days=1) else [0]
-    ev["reminders"] = asked
-    return ev
+    return build_event(d, now)
 
 def google_minutes(ev):
     """Google counts all-day reminders from 00:00 - shift day-based ones to 09:00."""
@@ -104,6 +154,8 @@ def describe(ev, header="📅 <b>Add this to Google Calendar?</b>"):
     if ev["location"]:
         lines.append(f"📍 {html.escape(ev['location'])}")
     lines.append("🔔 " + ", ".join(rem))
+    for note in ev.get("notes", []):
+        lines.append(f"⚠️ {html.escape(note)}")
     if day < dt.datetime.now(LOCAL).date():
         lines.append("⚠️ This date is in the past - please check it!")
     return "\n".join(lines)
