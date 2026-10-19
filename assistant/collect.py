@@ -4,6 +4,7 @@ import datetime as dt
 import html
 import re
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 import feedparser
@@ -26,6 +27,12 @@ def _published(entry):
         return None
     return dt.datetime.fromtimestamp(calendar.timegm(t), tz=dt.timezone.utc)
 
+def normalize_link(link):
+    """Remove tracking parameters so the same article always has the same URL."""
+    p = urlsplit(link.strip())
+    query = [(k, v) for k, v in parse_qsl(p.query) if not k.lower().startswith(("utm_", "at_"))]
+    return urlunsplit((p.scheme, p.netloc.lower(), p.path, urlencode(query), ""))
+
 def fetch_feed(feed):
     r = httpx.get(feed["url"], headers=HEADERS, timeout=20, follow_redirects=True)
     r.raise_for_status()
@@ -35,7 +42,7 @@ def fetch_feed(feed):
             continue
         items.append({
             "title": _clean(e.title, 200),
-            "link": e.link,
+            "link": normalize_link(e.link),
             "source": feed["name"],
             "category": feed["category"],
             "published": _published(e),
@@ -43,32 +50,32 @@ def fetch_feed(feed):
         })
     return items
 
-def collect(max_age_hours=36):
-    """Return (fresh items, per-source status report)."""
-    feeds = yaml.safe_load(CONFIG.read_text())["feeds"]
-    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=max_age_hours)
+def _excluded(item, cfg):
+    return (any(re.search(p, item["title"], re.I) for p in cfg.get("exclude_title", []))
+            or any(re.search(p, item["link"], re.I) for p in cfg.get("exclude_link", [])))
+
+def collect():
+    """Return (fresh, non-excluded items, per-source status report)."""
+    cfg = yaml.safe_load(CONFIG.read_text())
+    now = dt.datetime.now(dt.timezone.utc)
     items, report = [], []
-    for feed in feeds:
+    for feed in cfg["feeds"]:
+        cutoff = now - dt.timedelta(hours=feed.get("max_age_hours", cfg.get("max_age_hours", 36)))
         try:
             got = fetch_feed(feed)
         except Exception as e:
             report.append((feed["name"], f"FAILED - {type(e).__name__}: {e}"))
             continue
         fresh = [i for i in got if i["published"] and i["published"] >= cutoff]
+        kept = [i for i in fresh if not _excluded(i, cfg)]
         undated = sum(1 for i in got if not i["published"])
-        report.append((feed["name"], f"{len(got)} items, {len(fresh)} fresh, {undated} undated (dropped)"))
-        items.extend(fresh)
+        report.append((feed["name"], f"{len(got)} items, {len(fresh)} fresh, "
+                                     f"{len(fresh) - len(kept)} excluded, {undated} undated"))
+        items.extend(kept)
     return items, report
 
 if __name__ == "__main__":
     items, report = collect()
-    print("=== Sources ===")
     for name, status in report:
         print(f"  {name}: {status}")
-    print(f"\n=== Newest 3 per category ({len(items)} fresh total) ===")
-    for cat in sorted({i["category"] for i in items}):
-        print(f"\n[{cat}]")
-        newest = sorted((i for i in items if i["category"] == cat), key=lambda i: i["published"], reverse=True)[:3]
-        for i in newest:
-            print(f"  {i['published'].astimezone(LOCAL):%a %H:%M}  {i['title']}")
-            print(f"           {i['link']}")
+    print(f"{len(items)} items kept")

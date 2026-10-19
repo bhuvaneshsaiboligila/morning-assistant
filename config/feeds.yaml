@@ -1,4 +1,15 @@
+# Default: only articles from the last 36 hours count as new.
+max_age_hours: 36
+
+# Skip articles whose title or link matches any of these (regex, case-insensitive).
+exclude_title:
+  - "^Watch:"
+  - "in 100 Sekunden"
+exclude_link:
+  - "/videos?/"
+
 # Add or remove sources here. category is free text.
+# A source can override the time window with its own max_age_hours.
 feeds:
   - name: BBC World
     url: https://feeds.bbci.co.uk/news/world/rss.xml
@@ -12,6 +23,7 @@ feeds:
   - name: NVIDIA Technical Blog
     url: https://developer.nvidia.com/blog/feed
     category: tech
+    max_age_hours: 168
   - name: arXiv cs.DC (parallel computing)
     url: https://rss.arxiv.org/rss/cs.DC
     category: research
