@@ -87,7 +87,7 @@ class typing:
 
 def wake_notice():
     if not model_loaded():
-        send("⏳ Waking up the model (about 2–3 min the first time)…")
+        send("⏳ Waking up the model (about 1 min the first time)…")
 
 def chat(text):
     wake_notice()

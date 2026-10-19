@@ -138,7 +138,7 @@ no new services, no vector DB, no embedding model.
 
 ## Hardware constraints this was built around
 - GTX 1650 (4 GB VRAM), 5.7 GB RAM → 4B model, mostly on GPU, ~15 tokens/s
-- Model stored on a USB 2.0 stick mounted at boot → ~2.5 min cold load, so the
+- Model stored on a USB 2.0 stick mounted at boot → ~1 min cold load from the internal HDD (was ~2.5 min from USB 2.0), so the
   briefing job starts at 05:25 for 05:30 delivery
 - The model unloads after idle time so the laptop stays usable
 
