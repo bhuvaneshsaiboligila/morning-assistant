@@ -1,0 +1,6 @@
+ollama
+httpx
+feedparser
+pyyaml
+icalendar
+recurring-ical-events

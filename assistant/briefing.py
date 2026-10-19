@@ -9,6 +9,7 @@ import datetime as dt
 import html
 from zoneinfo import ZoneInfo
 
+from assistant.agenda import fetch_events, format_agenda
 from assistant.collect import collect
 from assistant.notify import send
 from assistant.rank import select
@@ -46,6 +47,11 @@ def build(log=print):
     save_new(con, items)
     failed = [name for name, status in report if status.startswith("FAILED")]
     picked = select(unbriefed(con))
+    agenda, cal_error = None, None
+    try:
+        agenda = format_agenda(fetch_events())
+    except Exception as e:
+        cal_error = str(e)
 
     blocks, model_ok, count = [], True, 0
     for section, articles in picked.items():
@@ -75,8 +81,10 @@ def build(log=print):
         header += "\n⚠️ Sources unavailable: " + esc(", ".join(failed))
     if not model_ok:
         header += "\n⚠️ Local AI unavailable: showing original snippets instead of summaries."
+    if cal_error:
+        header += "\n⚠️ Calendar unavailable: " + esc(cal_error)
     links = [a["link"] for articles in picked.values() for a in articles]
-    return [header] + blocks, links
+    return [header] + ([agenda] if agenda else []) + blocks, links
 
 def pack(blocks):
     """Join blocks into as few Telegram messages as possible."""

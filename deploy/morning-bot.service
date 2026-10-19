@@ -1,0 +1,15 @@
+[Unit]
+Description=Telegram chat bot for the local assistant
+Wants=network-online.target
+After=network-online.target ollama.service
+
+[Service]
+User=bhuvanesh
+WorkingDirectory=/home/bhuvanesh/morning-assistant
+EnvironmentFile=/home/bhuvanesh/morning-assistant/.env
+ExecStart=/home/bhuvanesh/morning-assistant/.venv/bin/python -u -m assistant.bot
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

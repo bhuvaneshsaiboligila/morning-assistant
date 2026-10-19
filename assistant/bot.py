@@ -21,6 +21,7 @@ MAX_HISTORY = 12  # messages remembered in the current conversation
 HELP = ("Hi! I'm your local assistant, running on your laptop.\n\n"
         "Just write to chat with me.\n"
         "/new – start a fresh conversation\n"
+        "/today – my calendar for the next 7 days\n"
         "/briefing – get a news briefing now\n"
         "/help – show this message")
 
@@ -87,6 +88,9 @@ def handle(text):
     elif cmd == "/new":
         history.clear()
         send("🧹 New conversation started.")
+    elif cmd == "/today":
+        from assistant.agenda import fetch_events, format_agenda
+        send(format_agenda(fetch_events()), html=True)
     elif cmd == "/briefing":
         run_briefing()
     else:
@@ -95,6 +99,7 @@ def handle(text):
 def main():
     _call("setMyCommands", http="POST", json={"commands": [
         {"command": "new", "description": "Start a fresh conversation"},
+        {"command": "today", "description": "My calendar for the next 7 days"},
         {"command": "briefing", "description": "Get a news briefing now"},
         {"command": "help", "description": "Show commands"}]})
     # Skip messages that arrived while the bot was off

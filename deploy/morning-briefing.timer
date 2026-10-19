@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily morning briefing at 05:25 (arrives ~05:30)
+
+[Timer]
+OnCalendar=*-*-* 05:25:00
+Persistent=true
+WakeSystem=true
+
+[Install]
+WantedBy=timers.target
