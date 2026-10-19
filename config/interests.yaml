@@ -1,0 +1,48 @@
+# Sections of the briefing: how important each is, and how many items it gets.
+# A category from feeds.yaml that is not listed here is left out of the briefing.
+sections:
+  research: {priority: 3, max_items: 4}
+  tech:     {priority: 3, max_items: 4}
+  world:    {priority: 2, max_items: 4}
+  germany:  {priority: 2, max_items: 3}
+  india:    {priority: 1, max_items: 3}
+
+# Words in the title or summary add (or subtract) points. Case-insensitive.
+# A word matches at the start of a word, so "supercomput" matches "supercomputer".
+keywords:
+  # --- my interests ---
+  cuda: 4
+  mpi: 4
+  hpc: 4
+  high-performance computing: 4
+  supercomput: 4
+  quantum: 4
+  cfd: 4
+  openmp: 3
+  gpu: 3
+  simulation: 3
+  error correction: 3
+  nvidia: 2
+  llm: 2
+  language model: 2
+  open-source: 1
+  # --- big news signals ---
+  election: 2
+  ceasefire: 2
+  earthquake: 2
+  european union: 2
+  supreme court: 2
+  isro: 3
+  # --- German news ---
+  bundestag: 2
+  bundesregierung: 2
+  wahl: 2
+  waffenruhe: 2
+  # --- near me ---
+  nürnberg: 3
+  bayern: 2
+  deggendorf: 4
+  # --- less interesting ---
+  killed after: -2
+  celebrity: -3
+  horoscope: -5
