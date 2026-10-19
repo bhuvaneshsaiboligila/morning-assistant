@@ -20,10 +20,12 @@ def find_chat_ids():
     """Chat IDs of everyone who has messaged the bot."""
     return {u["message"]["chat"]["id"] for u in _call("getUpdates") if "message" in u}
 
-def send(text, chat_id=None):
-    chat_id = chat_id or os.environ["TELEGRAM_CHAT_ID"]
-    _call("sendMessage", http="POST", json={
-        "chat_id": chat_id, "text": text, "disable_web_page_preview": True})
+def send(text, chat_id=None, html=False):
+    payload = {"chat_id": chat_id or os.environ["TELEGRAM_CHAT_ID"],
+               "text": text, "disable_web_page_preview": True}
+    if html:
+        payload["parse_mode"] = "HTML"
+    _call("sendMessage", http="POST", json=payload)
     return True
 
 if __name__ == "__main__":
