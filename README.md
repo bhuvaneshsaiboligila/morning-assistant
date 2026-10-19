@@ -11,8 +11,10 @@ I can also chat with the same local model from Telegram.
   Bundesagentur für Arbeit job search API
 - **Ranking** by configurable keywords and section priorities (`config/interests.yaml`)
 - **AI summaries** — one sentence per story, translated to English, restricted to facts in the source
-- **Google Calendar** — today's events and the next 7 days at the top of the briefing
-- **Telegram bot** — chat with the local model; `/today`, `/briefing`, `/new`
+- **Google Calendar** — today's events and the next 7 days at the top of the briefing (Calendar API, iCal link as fallback)
+- **Add events by chat** — "remind me about my exam on 27 Jan 2027 at 10:00, 1 week before" → the local model
+  extracts the event as structured JSON → confirmation card with ✅/❌ buttons → Google Calendar with reminders
+- **Telegram bot** — chat with the local model; `/today`, `/add`, `/briefing`, `/new`
 - **Automation** — systemd timer wakes the laptop from sleep, retries on network
   failure, never sends twice a day, catches up after the laptop was off
 
@@ -30,7 +32,9 @@ Telegram messages ──► bot ──► local LLM ─────────�
 | `assistant/store.py` | SQLite store — every item is reported only once |
 | `assistant/rank.py` | Keyword + priority + recency scoring per section |
 | `assistant/summarize.py` | One-line summaries with the local model (Ollama) |
-| `assistant/agenda.py` | Google Calendar events (private iCal link), recurring events expanded |
+| `assistant/agenda.py` | Calendar events via Google Calendar API, iCal link as fallback |
+| `assistant/gcal.py` | Google Calendar OAuth, create/delete events with reminders |
+| `assistant/events.py` | Chat message → event via the local model with a JSON schema, validated in Python |
 | `assistant/briefing.py` | Builds the briefing, splits it into Telegram messages, marks items as sent |
 | `assistant/bot.py` | Two-way Telegram chat, owner-only |
 | `assistant/notify.py` | Telegram API, errors never contain the token |
@@ -63,6 +67,5 @@ only the finished briefing is sent to Telegram.
 
 ## Roadmap
 - Reminders via chat with confirmation buttons
-- Writing events to Google Calendar
 - Sports (F1, cricket, football) with local start times
 - Grouping the same story from different outlets
