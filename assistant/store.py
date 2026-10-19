@@ -26,6 +26,10 @@ def connect():
     con = sqlite3.connect(DB)
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
+    try:
+        DB.chmod(0o600)
+    except OSError:
+        pass
     return con
 
 def save_new(con, items):
