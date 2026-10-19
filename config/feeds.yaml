@@ -7,6 +7,7 @@ exclude_title:
   - "in 100 Sekunden"
 exclude_link:
   - "/videos?/"
+  - "/wetter/"
 
 # Add or remove sources here. category is free text.
 # A source can override the time window with its own max_age_hours.
@@ -27,3 +28,20 @@ feeds:
   - name: arXiv cs.DC (parallel computing)
     url: https://rss.arxiv.org/rss/cs.DC
     category: research
+
+  # ---- Jobs: Bundesagentur für Arbeit job search (public API) ----
+  # angebotsart 34 = internship/trainee. Leave it out for normal jobs.
+  - name: Arbeitsagentur Jobs
+    type: arbeitsagentur
+    category: jobs
+    days: 7               # only jobs published in the last 7 days
+    max_age_hours: 192
+    searches:
+      - {was: "HPC"}
+      - {was: "High Performance Computing"}
+      - {was: "Simulation", angebotsart: 34}
+      - {was: "Werkstudent Simulation"}
+      - {was: "CFD"}
+      - {was: "CUDA"}
+      - {was: "Quantencomputing"}
+      - {was: "Masterarbeit Simulation"}

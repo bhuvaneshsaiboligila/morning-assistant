@@ -1,6 +1,7 @@
 # Sections of the briefing: how important each is, and how many items it gets.
 # A category from feeds.yaml that is not listed here is left out of the briefing.
 sections:
+  jobs:     {priority: 4, max_items: 6}
   research: {priority: 3, max_items: 4}
   tech:     {priority: 3, max_items: 4}
   world:    {priority: 2, max_items: 4}
@@ -42,6 +43,21 @@ keywords:
   nürnberg: 3
   bayern: 2
   deggendorf: 4
+  # --- jobs ---
+  praktikum: 2
+  internship: 2
+  werkstudent: 2
+  working student: 2
+  masterarbeit: 2
+  dlr: 4
+  deutsches zentrum für luft: 4
+  fraunhofer: 4
+  leibniz-rechenzentrum: 4
+  lrz: 4
+  siemens: 2
+  zeiss: 3
+  dassault: 3
+  helsing: 3
   # --- less interesting ---
   killed after: -2
   celebrity: -3

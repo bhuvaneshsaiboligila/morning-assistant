@@ -47,4 +47,5 @@ if __name__ == "__main__":
         for a in items:
             hits = f"  ({', '.join(a['hits'])})" if a["hits"] else ""
             print(f"  {a['score']:5.1f}  {a['title'][:90]}{hits}")
+            print(f"         {a['link']}")
         print()
