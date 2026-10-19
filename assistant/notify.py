@@ -44,6 +44,14 @@ def send(text, chat_id=None, html=False, **extra):
     _call("sendMessage", http="POST", json=payload)
     return True
 
+def send_document(path, caption=None, chat_id=None):
+    data = {"chat_id": chat_id or os.environ["TELEGRAM_CHAT_ID"]}
+    if caption:
+        data["caption"] = caption
+    with open(path, "rb") as f:
+        _call("sendDocument", http="POST", data=data, files={"document": f})
+    return True
+
 if __name__ == "__main__":
     if sys.argv[1:] == ["chat-id"]:
         print(find_chat_ids())

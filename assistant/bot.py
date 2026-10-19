@@ -1,6 +1,6 @@
 """Two-way Telegram chat with the local AI. Only answers TELEGRAM_CHAT_ID (me).
 
-Commands: /help /new /today /briefing /add
+Commands: /help /new /today /briefing /add /j /ask /memories /forget /journal /export /week
 Messages starting with "remind me", "add" or "schedule" become a Google Calendar
 event - but only after I tap ✅ on the confirmation card.
 """
@@ -9,15 +9,17 @@ import html
 import os
 import re
 import sys
+import tempfile
 import threading
 import time
 import traceback
 import uuid
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import ollama
 
-from assistant.notify import _call, redact, send
+from assistant.notify import _call, redact, send, send_document
 from assistant.summarize import MODEL
 
 LOCAL = ZoneInfo("Europe/Berlin")
@@ -30,6 +32,14 @@ HELP = ("Hi! I'm your local assistant, running on your laptop.\n\n"
         "📅 To add something to Google Calendar, start your message with "
         "'remind me', 'add' or 'schedule', for example:\n"
         "remind me about my exam on 27 Jan 2027 at 10:00, 1 week before\n\n"
+        "📝 Private journal (never logged, stays local):\n"
+        "/j <text> – save a journal entry\n"
+        "/ask <question> – ask about your journal and memories\n"
+        "/memories [kind] – list active memories\n"
+        "/forget <id> – forget a memory (see its id in /memories)\n"
+        "/journal [YYYY-MM-DD|today|yesterday] – show a day's entries\n"
+        "/export – export entries + memories as a Markdown file\n"
+        "/week – build the weekly report now\n\n"
         "/today – my calendar for the next 7 days\n"
         "/briefing – get a news briefing now\n"
         "/new – start a fresh conversation\n"
@@ -47,7 +57,12 @@ def system_prompt():
             "Use plain text, no markdown tables. "
             "You cannot create calendar events or reminders yourself in this chat. If he asks for one, "
             "tell him to send a message starting with 'remind me' or 'add', e.g. "
-            "'remind me about the exam on 27 Jan 2027 at 10:00'.")
+            "'remind me about the exam on 27 Jan 2027 at 10:00'. "
+            "He also keeps a private journal: /j saves an entry, /ask answers questions about it. "
+            "In THIS normal chat you do NOT have access to the journal or any long-term memory of "
+            "past conversations - never claim to remember something he told you before unless it "
+            "is in the messages above; if he asks about the journal or something from the past, "
+            "tell him to use /ask.")
 
 def model_loaded():
     try:
@@ -100,6 +115,106 @@ def show_today():
     from assistant.agenda import fetch_events, format_agenda
     send(format_agenda(fetch_events()), html=True)
 
+def save_journal_entry(text):
+    if not text:
+        send("Usage: /j <what's on your mind>")
+        return
+    from assistant.journal import add_entry, connect, extract_memories
+    con = connect()
+    entry_id = add_entry(con, text)
+    send("📝 Saved")
+    with typing():
+        extract_memories(con, entry_id, text, log=lambda m: print(m, flush=True))
+
+def answer_question(question):
+    if not question:
+        send("Usage: /ask <question>")
+        return
+    from assistant.journal import ask, connect
+    wake_notice()
+    with typing():
+        try:
+            answer = ask(connect(), question)
+        except Exception:
+            print(redact(traceback.format_exc()), file=sys.stderr, flush=True)
+            send("⚠️ Something went wrong - details are in the laptop log.")
+            return
+    send(answer)
+
+def show_memories(kind_arg):
+    from assistant.journal import MEMORY_KINDS, active_memories, connect
+    kind = kind_arg.strip().lower() if kind_arg.strip().lower() in MEMORY_KINDS else None
+    mems = active_memories(connect(), kind)
+    if not mems:
+        send("🧠 No active memories" + (f" of kind '{kind}'." if kind else "."))
+        return
+    groups = {}
+    for m in mems:
+        groups.setdefault(m["kind"], []).append(m)
+    lines = ["🧠 <b>Active memories</b>"]
+    for k in MEMORY_KINDS:
+        if k not in groups:
+            continue
+        lines.append(f"\n<b>{k}</b>")
+        lines += [f"  [{m['id']}] {html.escape(m['text'])}" for m in groups[k]]
+    send("\n".join(lines), html=True)
+
+def forget(arg):
+    from assistant.journal import connect, forget_memory
+    try:
+        memory_id = int(arg.strip())
+    except ValueError:
+        send("Usage: /forget <id> (see the id in /memories)")
+        return
+    con = connect()
+    if not con.execute("SELECT 1 FROM memories WHERE id=? AND status='active'", (memory_id,)).fetchone():
+        send("⚠️ No active memory with that id.")
+        return
+    forget_memory(con, memory_id)
+    send(f"🗑 Forgot memory [{memory_id}].")
+
+def show_journal(arg):
+    from assistant.journal import connect, entries_on_day
+    today = dt.datetime.now(LOCAL).date()
+    arg = (arg or "today").strip().lower()
+    if arg == "today":
+        day = today
+    elif arg == "yesterday":
+        day = today - dt.timedelta(days=1)
+    else:
+        try:
+            day = dt.date.fromisoformat(arg)
+        except ValueError:
+            send("Usage: /journal [YYYY-MM-DD|today|yesterday]")
+            return
+    entries = entries_on_day(connect(), day)
+    if not entries:
+        send(f"📓 No journal entries for {day:%a %d %b}.")
+        return
+    lines = [f"📓 <b>{day:%A, %d %B}</b>"]
+    for e in entries:
+        t = dt.datetime.fromisoformat(e["created_at"]).astimezone(LOCAL)
+        lines.append(f"\n<i>{t:%H:%M}</i>\n{html.escape(e['text'])}")
+    send("\n".join(lines), html=True)
+
+def export_journal():
+    from assistant.journal import connect, export_markdown
+    text = export_markdown(connect())
+    path = Path(tempfile.gettempdir()) / f"journal-export-{uuid.uuid4().hex[:8]}.md"
+    path.write_text(text)
+    try:
+        send_document(str(path), caption="📤 Journal export")
+    finally:
+        path.unlink(missing_ok=True)
+
+def send_report_now():
+    from assistant.journal import deliver_report
+    wake_notice()
+    with typing():
+        result = deliver_report("week", kind="manual", log=lambda *_: None)
+    if result["status"] == "locked":
+        send("A briefing is already being built - it will arrive shortly.")
+
 def handle_event(text):
     from assistant.events import describe, parse
     wake_notice()
@@ -141,7 +256,9 @@ def handle_button(cq):
         "parse_mode": "HTML", "disable_web_page_preview": True})
 
 def handle(text):
-    cmd = text.strip().split()[0].lower() if text.strip() else ""
+    stripped = text.strip()
+    cmd = stripped.split()[0].lower() if stripped else ""
+    arg = stripped[len(cmd):].strip()
     if cmd in ("/start", "/help"):
         send(HELP)
     elif cmd == "/new":
@@ -151,6 +268,20 @@ def handle(text):
         show_today()
     elif cmd == "/briefing":
         run_briefing()
+    elif cmd == "/j":
+        save_journal_entry(arg)
+    elif cmd == "/ask":
+        answer_question(arg)
+    elif cmd == "/memories":
+        show_memories(arg)
+    elif cmd == "/forget":
+        forget(arg)
+    elif cmd == "/journal":
+        show_journal(arg)
+    elif cmd == "/export":
+        export_journal()
+    elif cmd == "/week":
+        send_report_now()
     elif EVENT_RE.match(text):
         handle_event(text)
     else:
@@ -170,6 +301,13 @@ def main():
         {"command": "today", "description": "My calendar for the next 7 days"},
         {"command": "add", "description": "Add an event, e.g. /add exam 27 Jan 2027 10:00"},
         {"command": "briefing", "description": "Get a news briefing now"},
+        {"command": "j", "description": "Save a journal entry"},
+        {"command": "ask", "description": "Ask about your journal and memories"},
+        {"command": "memories", "description": "List active memories"},
+        {"command": "forget", "description": "Forget a memory by id"},
+        {"command": "journal", "description": "Show a day's journal entries"},
+        {"command": "export", "description": "Export journal as Markdown"},
+        {"command": "week", "description": "Build the weekly report now"},
         {"command": "new", "description": "Start a fresh conversation"},
         {"command": "help", "description": "Show commands"}]})
     pending_updates = _call("getUpdates", params={"timeout": 0})
