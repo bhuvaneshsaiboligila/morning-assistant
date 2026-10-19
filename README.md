@@ -17,11 +17,12 @@ I can also chat with the same local model from Telegram.
   failure, never sends twice a day, catches up after the laptop was off
 
 ## Architecture
-RSS feeds ─┐
-Job API ───┼─► collect ─► SQLite (dedup) ─► rank ─► local LLM summaries ─┐
-Calendar ──┘ ├─► Telegram
-Telegram messages ─► bot ─► local LLM ┘
-
+```text
+RSS feeds ──┐
+Job API  ───┼──► collect ──► SQLite (dedup) ──► rank ──► local LLM summaries ──┐
+Calendar ───┘                                                                  ├──► Telegram (phone)
+Telegram messages ──► bot ──► local LLM ───────────────────────────────────────┘
+```
 
 | Module | Role |
 |---|---|
@@ -42,12 +43,13 @@ Telegram messages ─► bot ─► local LLM ┘
 
 ## Setup
 ```bash
-git clone <this repo> && cd morning-assistant
+git clone https://github.com/bhuvaneshsaiboligila/morning-assistant.git
+cd morning-assistant
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env            # fill in your own values
+cp .env.example .env                    # fill in your own values
 ollama pull qwen3.5:4b
-python -m assistant.briefing --print   # dry run, sends nothing
+python -m assistant.briefing --print    # dry run, sends nothing
 ```
 systemd units for the timer and the bot are in `deploy/`.
 
