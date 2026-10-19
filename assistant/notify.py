@@ -1,9 +1,24 @@
 """Telegram delivery: send messages to my phone."""
 import os
+import re
 import sys
 import httpx
 
 API = "https://api.telegram.org/bot{token}/{name}"
+
+def redact(s):
+    """Strip secrets from a string before it is logged or sent anywhere."""
+    s = str(s)
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    if token:
+        s = s.replace(token, "[REDACTED]")
+    ics_url = os.environ.get("GOOGLE_ICS_URL")
+    if ics_url:
+        s = s.replace(ics_url, "[REDACTED]")
+    s = re.sub(r"\b\d{6,}:[\w-]{30,}\b", "[REDACTED]", s)          # Telegram bot token shape
+    s = re.sub(r"\bya29\.[\w\-.]+", "[REDACTED]", s)               # Google OAuth access token
+    s = re.sub(r"\b1//[\w\-]+", "[REDACTED]", s)                   # Google OAuth refresh token
+    return s
 
 def _call(name, http="GET", timeout=15, **kwargs):
     url = API.format(token=os.environ["TELEGRAM_BOT_TOKEN"], name=name)
