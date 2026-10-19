@@ -4,6 +4,7 @@ Commands: /help  /new  /briefing
 """
 import datetime as dt
 import os
+import threading
 import time
 import traceback
 from zoneinfo import ZoneInfo
@@ -39,16 +40,31 @@ def model_loaded():
     except Exception:
         return False
 
+class typing:
+    """Show 'typing…' in Telegram until the block finishes (Telegram drops it after 5 s)."""
+    def __enter__(self):
+        self.stop = threading.Event()
+        threading.Thread(target=self._loop, daemon=True).start()
+    def _loop(self):
+        while not self.stop.is_set():
+            try:
+                _call("sendChatAction", http="POST", json={"chat_id": OWNER, "action": "typing"})
+            except Exception:
+                pass
+            self.stop.wait(4)
+    def __exit__(self, *exc):
+        self.stop.set()
+
 def reply_chat(text):
     if not model_loaded():
         send("⏳ Waking up the model (about 2–3 min the first time)…")
-    _call("sendChatAction", http="POST", json={"chat_id": OWNER, "action": "typing"})
     history.append({"role": "user", "content": text})
     del history[:-MAX_HISTORY]
-    r = ollama.chat(model=MODEL,
-                    messages=[{"role": "system", "content": system_prompt()}] + history,
-                    think=False, keep_alive="10m",
-                    options={"temperature": 0.6, "num_ctx": 4096})
+    with typing():
+        r = ollama.chat(model=MODEL,
+                        messages=[{"role": "system", "content": system_prompt()}] + history,
+                        think=False, keep_alive="10m",
+                        options={"temperature": 0.6, "num_ctx": 4096})
     answer = r.message.content.strip() or "(empty answer)"
     history.append({"role": "assistant", "content": answer})
     for i in range(0, len(answer), 4000):
@@ -58,7 +74,8 @@ def run_briefing():
     from assistant.briefing import build, pack
     from assistant.store import connect, mark_briefed
     send("📰 Building your briefing (about 4 min)…")
-    blocks, links = build(log=lambda *_: None)
+    with typing():
+        blocks, links = build(log=lambda *_: None)
     for m in pack(blocks):
         send(m, html=True)
     mark_briefed(connect(), links)
