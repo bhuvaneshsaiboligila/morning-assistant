@@ -5,10 +5,10 @@ import httpx
 
 API = "https://api.telegram.org/bot{token}/{name}"
 
-def _call(name, http="GET", **kwargs):
+def _call(name, http="GET", timeout=15, **kwargs):
     url = API.format(token=os.environ["TELEGRAM_BOT_TOKEN"], name=name)
     try:
-        r = httpx.request(http, url, timeout=15, **kwargs)
+        r = httpx.request(http, url, timeout=timeout, **kwargs)
         data = r.json()
     except httpx.HTTPError as e:
         raise RuntimeError(f"Telegram {name}: network error ({type(e).__name__})") from None
