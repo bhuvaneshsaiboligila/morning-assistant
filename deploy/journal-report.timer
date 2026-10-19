@@ -1,0 +1,11 @@
+[Unit]
+Description=Journal report at 09:00 every Sunday (weekly) and on the 1st of the month (monthly)
+
+[Timer]
+OnCalendar=Sun *-*-* 09:00:00
+OnCalendar=*-*-01 09:00:00
+Persistent=true
+WakeSystem=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=Weekly/monthly journal report to Telegram
+Wants=network-online.target
+After=network-online.target ollama.service
+StartLimitIntervalSec=2h
+StartLimitBurst=4
+
+[Service]
+Type=oneshot
+User=bhuvanesh
+WorkingDirectory=/home/bhuvanesh/morning-assistant
+EnvironmentFile=/home/bhuvanesh/morning-assistant/.env
+ExecStart=/home/bhuvanesh/morning-assistant/.venv/bin/python -m assistant.journal
+TimeoutStartSec=25min
+Restart=on-failure
+RestartSec=5min
