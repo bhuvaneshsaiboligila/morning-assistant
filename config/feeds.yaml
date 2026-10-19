@@ -1,0 +1,17 @@
+# Add or remove sources here. category is free text.
+feeds:
+  - name: BBC World
+    url: https://feeds.bbci.co.uk/news/world/rss.xml
+    category: world
+  - name: Tagesschau
+    url: https://www.tagesschau.de/index~rss2.xml
+    category: germany
+  - name: The Hindu - National
+    url: https://www.thehindu.com/news/national/feeder/default.rss
+    category: india
+  - name: NVIDIA Technical Blog
+    url: https://developer.nvidia.com/blog/feed
+    category: tech
+  - name: arXiv cs.DC (parallel computing)
+    url: https://rss.arxiv.org/rss/cs.DC
+    category: research
