@@ -8,6 +8,7 @@ import datetime as dt
 import html
 import os
 import re
+import sys
 import threading
 import time
 import traceback
@@ -16,7 +17,7 @@ from zoneinfo import ZoneInfo
 
 import ollama
 
-from assistant.notify import _call, send
+from assistant.notify import _call, redact, send
 from assistant.summarize import MODEL
 
 LOCAL = ZoneInfo("Europe/Berlin")
@@ -88,14 +89,12 @@ def chat(text):
         send(answer[i:i + 4000])
 
 def run_briefing():
-    from assistant.briefing import build, pack
-    from assistant.store import connect, mark_briefed
-    send("📰 Building your briefing (about 4 min)…")
+    from assistant.briefing import deliver_briefing
+    wake_notice()
     with typing():
-        blocks, links = build(log=lambda *_: None)
-    for m in pack(blocks):
-        send(m, html=True)
-    mark_briefed(connect(), links)
+        result = deliver_briefing(kind="manual", log=lambda *_: None)
+    if result["status"] == "locked":
+        send("A briefing is already being built - it will arrive shortly.")
 
 def show_today():
     from assistant.agenda import fetch_events, format_agenda
@@ -108,14 +107,16 @@ def handle_event(text):
         try:
             ev = parse(re.sub(r"^\s*/add\s*", "", text))
         except Exception:
-            traceback.print_exc()
+            print(redact(traceback.format_exc()), file=sys.stderr, flush=True)
             send("🤔 I couldn't turn that into an event. Try for example:\n"
                  "remind me about my Linear Algebra exam on 27 Jan 2027 at 10:00")
             return
     pid = uuid.uuid4().hex[:8]
     pending[pid] = ev
+    day = ev["start"] if ev["all_day"] else ev["start"].date()
+    add_label = "✅ Add anyway" if day < dt.datetime.now(LOCAL).date() else "✅ Add"
     send(describe(ev), html=True, reply_markup={"inline_keyboard": [[
-        {"text": "✅ Add", "callback_data": f"add:{pid}"},
+        {"text": add_label, "callback_data": f"add:{pid}"},
         {"text": "❌ Cancel", "callback_data": f"no:{pid}"}]]})
 
 def handle_button(cq):
@@ -156,13 +157,13 @@ def handle(text):
         chat(text)
 
 def report(e):
-    traceback.print_exc()
+    print(redact(traceback.format_exc()), file=sys.stderr, flush=True)
     s = str(e)
     if "invalid_grant" in s or type(e).__name__ == "RefreshError" or "not authorized" in s:
         send("🔑 Google Calendar login expired. On the laptop run:\n"
              "cd ~/morning-assistant && .venv/bin/python -m assistant.gcal auth")
     else:
-        send(f"⚠️ Something went wrong: {type(e).__name__}: {s}"[:500])
+        send("⚠️ Something went wrong - details are in the laptop log.")
 
 def main():
     _call("setMyCommands", http="POST", json={"commands": [
@@ -182,7 +183,7 @@ def main():
                 params["offset"] = offset
             updates = _call("getUpdates", params=params, timeout=60)
         except Exception as e:
-            print(f"poll error: {e}", flush=True)
+            print(f"poll error: {redact(str(e))}", flush=True)
             time.sleep(10)
             continue
         for u in updates:
