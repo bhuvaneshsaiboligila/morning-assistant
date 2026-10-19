@@ -1,12 +1,17 @@
 """Two-way Telegram chat with the local AI. Only answers TELEGRAM_CHAT_ID (me).
 
-Commands: /help  /new  /briefing
+Commands: /help /new /today /briefing /add
+Messages starting with "remind me", "add" or "schedule" become a Google Calendar
+event - but only after I tap ✅ on the confirmation card.
 """
 import datetime as dt
+import html
 import os
+import re
 import threading
 import time
 import traceback
+import uuid
 from zoneinfo import ZoneInfo
 
 import ollama
@@ -16,16 +21,21 @@ from assistant.summarize import MODEL
 
 LOCAL = ZoneInfo("Europe/Berlin")
 OWNER = int(os.environ["TELEGRAM_CHAT_ID"])
-MAX_HISTORY = 12  # messages remembered in the current conversation
+MAX_HISTORY = 12
+EVENT_RE = re.compile(r"^\s*(/add\b|add\b|remind me\b|schedule\b)", re.I)
 
 HELP = ("Hi! I'm your local assistant, running on your laptop.\n\n"
-        "Just write to chat with me.\n"
-        "/new – start a fresh conversation\n"
+        "Just write to chat with me.\n\n"
+        "📅 To add something to Google Calendar, start your message with "
+        "'remind me', 'add' or 'schedule', for example:\n"
+        "remind me about my exam on 27 Jan 2027 at 10:00, 1 week before\n\n"
         "/today – my calendar for the next 7 days\n"
         "/briefing – get a news briefing now\n"
+        "/new – start a fresh conversation\n"
         "/help – show this message")
 
 history = []
+pending = {}  # confirmation-card id -> event waiting for ✅ / ❌
 
 def system_prompt():
     now = dt.datetime.now(LOCAL)
@@ -33,7 +43,10 @@ def system_prompt():
             f"Today is {now:%A, %d %B %Y}, the time is {now:%H:%M} (Europe/Berlin). "
             "Answer concisely and clearly. You have NO internet access: never invent current news, "
             "prices, sports results or dates - say you don't know instead. "
-            "Use plain text, no markdown tables.")
+            "Use plain text, no markdown tables. "
+            "You cannot create calendar events or reminders yourself in this chat. If he asks for one, "
+            "tell him to send a message starting with 'remind me' or 'add', e.g. "
+            "'remind me about the exam on 27 Jan 2027 at 10:00'.")
 
 def model_loaded():
     try:
@@ -56,9 +69,12 @@ class typing:
     def __exit__(self, *exc):
         self.stop.set()
 
-def reply_chat(text):
+def wake_notice():
     if not model_loaded():
         send("⏳ Waking up the model (about 2–3 min the first time)…")
+
+def chat(text):
+    wake_notice()
     history.append({"role": "user", "content": text})
     del history[:-MAX_HISTORY]
     with typing():
@@ -81,6 +97,48 @@ def run_briefing():
         send(m, html=True)
     mark_briefed(connect(), links)
 
+def show_today():
+    from assistant.agenda import fetch_events, format_agenda
+    send(format_agenda(fetch_events()), html=True)
+
+def handle_event(text):
+    from assistant.events import describe, parse
+    wake_notice()
+    with typing():
+        try:
+            ev = parse(re.sub(r"^\s*/add\s*", "", text))
+        except Exception:
+            traceback.print_exc()
+            send("🤔 I couldn't turn that into an event. Try for example:\n"
+                 "remind me about my Linear Algebra exam on 27 Jan 2027 at 10:00")
+            return
+    pid = uuid.uuid4().hex[:8]
+    pending[pid] = ev
+    send(describe(ev), html=True, reply_markup={"inline_keyboard": [[
+        {"text": "✅ Add", "callback_data": f"add:{pid}"},
+        {"text": "❌ Cancel", "callback_data": f"no:{pid}"}]]})
+
+def handle_button(cq):
+    _call("answerCallbackQuery", http="POST", json={"callback_query_id": cq["id"]})
+    action, _, pid = (cq.get("data") or "").partition(":")
+    msg = cq["message"]
+    ev = pending.pop(pid, None)
+    if ev is None:
+        text = "⌛ This request expired (the bot was restarted). Please send it again."
+    elif action == "no":
+        text = "❌ Cancelled - nothing was added."
+    else:
+        from assistant.events import describe, google_minutes
+        from assistant.gcal import create_event
+        created = create_event(ev["title"], ev["start"], ev["end"], all_day=ev["all_day"],
+                               location=ev["location"], reminders=google_minutes(ev),
+                               description="Added via morning-assistant")
+        text = (describe(ev, header="✅ <b>Added to Google Calendar</b>")
+                + f'\n\n<a href="{html.escape(created["htmlLink"])}">Open in Google Calendar</a>')
+    _call("editMessageText", http="POST", json={
+        "chat_id": msg["chat"]["id"], "message_id": msg["message_id"], "text": text,
+        "parse_mode": "HTML", "disable_web_page_preview": True})
+
 def handle(text):
     cmd = text.strip().split()[0].lower() if text.strip() else ""
     if cmd in ("/start", "/help"):
@@ -89,27 +147,37 @@ def handle(text):
         history.clear()
         send("🧹 New conversation started.")
     elif cmd == "/today":
-        from assistant.agenda import fetch_events, format_agenda
-        send(format_agenda(fetch_events()), html=True)
+        show_today()
     elif cmd == "/briefing":
         run_briefing()
+    elif EVENT_RE.match(text):
+        handle_event(text)
     else:
-        reply_chat(text)
+        chat(text)
+
+def report(e):
+    traceback.print_exc()
+    s = str(e)
+    if "invalid_grant" in s or type(e).__name__ == "RefreshError" or "not authorized" in s:
+        send("🔑 Google Calendar login expired. On the laptop run:\n"
+             "cd ~/morning-assistant && .venv/bin/python -m assistant.gcal auth")
+    else:
+        send(f"⚠️ Something went wrong: {type(e).__name__}: {s}"[:500])
 
 def main():
     _call("setMyCommands", http="POST", json={"commands": [
-        {"command": "new", "description": "Start a fresh conversation"},
         {"command": "today", "description": "My calendar for the next 7 days"},
+        {"command": "add", "description": "Add an event, e.g. /add exam 27 Jan 2027 10:00"},
         {"command": "briefing", "description": "Get a news briefing now"},
+        {"command": "new", "description": "Start a fresh conversation"},
         {"command": "help", "description": "Show commands"}]})
-    # Skip messages that arrived while the bot was off
-    pending = _call("getUpdates", params={"timeout": 0})
-    offset = pending[-1]["update_id"] + 1 if pending else None
+    pending_updates = _call("getUpdates", params={"timeout": 0})
+    offset = pending_updates[-1]["update_id"] + 1 if pending_updates else None
     print("bot started", flush=True)
 
     while True:
         try:
-            params = {"timeout": 50, "allowed_updates": '["message"]'}
+            params = {"timeout": 50, "allowed_updates": '["message","callback_query"]'}
             if offset:
                 params["offset"] = offset
             updates = _call("getUpdates", params=params, timeout=60)
@@ -119,18 +187,22 @@ def main():
             continue
         for u in updates:
             offset = u["update_id"] + 1
-            msg = u.get("message") or {}
-            if msg.get("chat", {}).get("id") != OWNER:
-                continue  # ignore everyone except me
-            text = msg.get("text")
-            if not text:
-                send("I can only read text messages for now.")
-                continue
             try:
+                if "callback_query" in u:
+                    cq = u["callback_query"]
+                    if cq.get("from", {}).get("id") == OWNER:
+                        handle_button(cq)
+                    continue
+                msg = u.get("message") or {}
+                if msg.get("chat", {}).get("id") != OWNER:
+                    continue  # ignore everyone except me
+                text = msg.get("text")
+                if not text:
+                    send("I can only read text messages for now.")
+                    continue
                 handle(text)
             except Exception as e:
-                traceback.print_exc()
-                send(f"⚠️ Something went wrong: {type(e).__name__}: {e}"[:500])
+                report(e)
 
 if __name__ == "__main__":
     main()

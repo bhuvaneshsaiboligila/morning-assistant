@@ -83,6 +83,11 @@ def build(log=print):
         header += "\n⚠️ Local AI unavailable: showing original snippets instead of summaries."
     if cal_error:
         header += "\n⚠️ Calendar unavailable: " + esc(cal_error)
+    try:
+        from assistant.gcal import _creds
+        _creds()
+    except Exception:
+        header += "\n🔑 Google Calendar login expired - on the laptop run: python -m assistant.gcal auth"
     links = [a["link"] for articles in picked.values() for a in articles]
     return [header] + ([agenda] if agenda else []) + blocks, links
 

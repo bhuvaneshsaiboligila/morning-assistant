@@ -1,8 +1,11 @@
-"""Google Calendar API: create and delete events (OAuth token stored locally).
+"""Google Calendar API: create, list and delete events (OAuth token stored locally).
 
-    python -m assistant.gcal auth   # one-time login in the browser
+    python -m assistant.gcal auth   # one-time login in the browser (repeat if it expires)
     python -m assistant.gcal test   # create a test event, then delete it
 """
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="google")
+
 import datetime as dt
 import sys
 from pathlib import Path
@@ -39,8 +42,8 @@ def _creds(interactive=False):
 def service(interactive=False):
     return build("calendar", "v3", credentials=_creds(interactive), cache_discovery=False)
 
-def create_event(title, start, end=None, all_day=False, location="", description=""):
-    """Timed event: start/end are datetimes. All-day event: start/end are dates."""
+def create_event(title, start, end=None, all_day=False, location="", description="", reminders=None):
+    """Timed event: start/end are datetimes. All-day: dates. reminders: minutes before (popup)."""
     if all_day:
         end = end or start + dt.timedelta(days=1)
         times = {"start": {"date": start.isoformat()}, "end": {"date": end.isoformat()}}
@@ -49,6 +52,9 @@ def create_event(title, start, end=None, all_day=False, location="", description
         times = {"start": {"dateTime": start.isoformat(), "timeZone": TZ},
                  "end": {"dateTime": end.isoformat(), "timeZone": TZ}}
     body = {"summary": title, "location": location, "description": description, **times}
+    if reminders is not None:
+        body["reminders"] = {"useDefault": False,
+                             "overrides": [{"method": "popup", "minutes": m} for m in reminders]}
     return service().events().insert(calendarId="primary", body=body).execute()
 
 def delete_event(event_id):
